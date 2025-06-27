@@ -8,6 +8,9 @@
 
 ---
 
+🔗 [Download APK](https://github.com/Shivam007kumar/doughjo.app/releases/latest)
+
+---
 ## 🚀 Features
 
 - **Bite-sized Lessons:** Learn budgeting, saving, investing, credit, and more.
