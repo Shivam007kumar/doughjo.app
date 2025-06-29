@@ -14,39 +14,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useDailyQuiz } from '@/hooks/useDailyQuiz';
 import { supabase } from '@/lib/supabase';
 import { useRef } from 'react';
+import { fetchDailyQuiz, completeDailyQuiz } from '@/lib/dailyQuiz';
 
-const dailyQuizzes = [
-  {
-    id: 'quiz-1',
-    title: 'Emergency Fund Basics',
-    question: 'How many months of expenses should you save in an emergency fund?',
-    options: ['1-2 months', '3-6 months', '7-9 months', '10+ months'],
-    correctAnswer: 1,
-    reward: 20,
-    difficulty: 'Easy',
-    category: 'Saving'
-  },
-  {
-    id: 'quiz-2',
-    title: 'Credit Score Knowledge',
-    question: 'What is considered a good credit score range?',
-    options: ['300-579', '580-669', '670-739', '740-850'],
-    correctAnswer: 3,
-    reward: 25,
-    difficulty: 'Medium',
-    category: 'Credit'
-  },
-  {
-    id: 'quiz-3',
-    title: 'Budgeting Rule',
-    question: 'In the 50/30/20 rule, what percentage goes to savings?',
-    options: ['50%', '30%', '20%', '10%'],
-    correctAnswer: 2,
-    reward: 15,
-    difficulty: 'Easy',
-    category: 'Budgeting'
-  }
-];
+// Define Quiz type for dailyQuizzes
+type Quiz = {
+  id: string;
+  title: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  reward: number;
+  difficulty: string;
+  category: string;
+};
 
 export default function HomeScreen() {
   const { width } = useWindowDimensions();
@@ -56,6 +36,16 @@ export default function HomeScreen() {
   const [lessonProgress, setLessonProgress] = useState<{[key: string]: {completed: number, total: number}}>({});
   const [actualLessons, setActualLessons] = useState<any[]>([]);
   const isRefreshing = useRef(false);
+  const [dailyQuizzes, setDailyQuizzes] = useState<Quiz[]>([]);
+  const [uncompletedLessons, setUncompletedLessons] = useState<any[]>([]);
+  const [showDailyQuiz, setShowDailyQuiz] = useState(false);
+  const [dailyQuizData, setDailyQuizData] = useState<any>(null);
+  const [dailyQuizLoading, setDailyQuizLoading] = useState(false);
+  const [dailyQuizCompleted, setDailyQuizCompleted] = useState(false);
+  const [dailyQuizAlreadyCompleted, setDailyQuizAlreadyCompleted] = useState(false);
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  const [showQuizResult, setShowQuizResult] = useState(false);
+  const [quizCorrect, setQuizCorrect] = useState(false);
   
   // Use real profile data or defaults
   const streakDays = profile?.streak_days || 0;
@@ -179,6 +169,127 @@ export default function HomeScreen() {
     outputRange: ['0deg', '360deg'],
   });
 
+  useEffect(() => {
+    const fetchQuizzes = async () => {
+      const { data, error } = await supabase
+        .from('quizzes')
+        .select('*')
+        .limit(3); // or whatever number you want
+
+      if (error) {
+        console.error('Failed to fetch quizzes:', error);
+        setDailyQuizzes([]);
+      } else {
+        setDailyQuizzes(
+          data.map(q => ({
+            id: q.id,
+            title: q.title,
+            question: q.question,
+            options: q.options,
+            correctAnswer: q.correct_answer,
+            reward: q.reward,
+            difficulty: q.difficulty,
+            category: q.category,
+          }))
+        );
+      }
+    };
+
+    fetchQuizzes();
+  }, []);
+
+  useEffect(() => {
+    const fetchUncompletedLessons = async () => {
+      if (!profile?.id) return;
+
+      // Fetch all lessons
+      const { data: lessons, error: lessonsError } = await supabase
+        .from('lessons')
+        .select('*')
+        .order('order_index');
+
+      if (lessonsError) {
+        console.error('Error fetching lessons:', lessonsError);
+        setUncompletedLessons([]);
+        return;
+      }
+
+      // Fetch user's completed lessons
+      const { data: userProgress, error: progressError } = await supabase
+        .from('user_progress')
+        .select('lesson_id, completed')
+        .eq('user_id', profile.id)
+        .eq('completed', true);
+
+      if (progressError) {
+        console.error('Error fetching user progress:', progressError);
+        setUncompletedLessons([]);
+        return;
+      }
+
+      const completedLessonIds = userProgress?.map(up => up.lesson_id) || [];
+      // Filter out completed lessons and take top 3
+      const uncompleted = lessons.filter(l => !completedLessonIds.includes(l.id)).slice(0, 3);
+      setUncompletedLessons(uncompleted);
+    };
+    fetchUncompletedLessons();
+  }, [profile?.id]);
+
+  // Handler for tapping a daily quiz card
+  const handleDailyQuizPress = async () => {
+    if (!profile?.id) return;
+    setDailyQuizLoading(true);
+    try {
+      const result = await fetchDailyQuiz(profile.id);
+      if (result.alreadyCompleted) {
+        setDailyQuizAlreadyCompleted(true);
+        setDailyQuizData(null);
+      } else {
+        setDailyQuizData(result.quiz);
+        setDailyQuizAlreadyCompleted(false);
+      }
+      setShowDailyQuiz(true);
+    } catch (e) {
+      setDailyQuizData(null);
+      setDailyQuizAlreadyCompleted(false);
+      setShowDailyQuiz(true);
+    } finally {
+      setDailyQuizLoading(false);
+    }
+  };
+
+  // Handler for answering the quiz
+  const handleDailyQuizAnswer = async (idx: number) => {
+    if (!dailyQuizData || selectedAnswer !== null) return;
+    setSelectedAnswer(idx);
+    const question = dailyQuizData.questions[0];
+    const correct = idx === question.correctAnswer;
+    setQuizCorrect(correct);
+    setShowQuizResult(true);
+    if (correct && profile?.id) {
+      await completeDailyQuiz({
+        userId: profile.id,
+        lessonId: dailyQuizData.id,
+        correctAnswers: 1,
+        totalQuestions: 1,
+        coinsRewarded: dailyQuizData.reward || 15
+      });
+      setDailyQuizCompleted(true);
+      refreshProfile();
+    }
+  };
+
+  // Handler for closing the daily quiz modal
+  const handleCloseDailyQuiz = () => {
+    setShowDailyQuiz(false);
+    setDailyQuizData(null);
+    setSelectedAnswer(null);
+    setShowQuizResult(false);
+    setQuizCorrect(false);
+    setDailyQuizCompleted(false);
+    setDailyQuizAlreadyCompleted(false);
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -245,6 +356,7 @@ export default function HomeScreen() {
               <QuizCard
                 key={quiz.id}
                 quiz={quiz}
+                onPress={handleDailyQuizPress}
               />
             ))}
           </ScrollView>
@@ -259,84 +371,20 @@ export default function HomeScreen() {
           <Text style={styles.sectionSubtitle}>Master each dojo to earn your black belt</Text>
           
           <View style={styles.lessonCardsContainer}>
-            {/* Budgeting Dojo */}
-            <LessonCard
-              id={actualLessons.find(l => l.category === 'Budgeting')?.id || actualLessons.find(l => l.category === 'Finance Basics')?.id || 'budget-intro'}
-              title="Budgeting Basics"
-              description="Learn to create and stick to a budget"
-              icon={<Wallet color={Colors.accent.teal} size={24} />}
-              progress={lessonProgress['Budgeting'] ? lessonProgress['Budgeting'].completed / lessonProgress['Budgeting'].total : 
-                       lessonProgress['Finance Basics'] ? lessonProgress['Finance Basics'].completed / lessonProgress['Finance Basics'].total : 0}
-              lessons={lessonProgress['Budgeting']?.total || lessonProgress['Finance Basics']?.total || 1}
-              completedLessons={lessonProgress['Budgeting']?.completed || lessonProgress['Finance Basics']?.completed || 0}
-              belt="green"
-              locked={false}
-            />
-            
-            {/* Saving Dojo */}
-            <LessonCard
-              id={actualLessons.find(l => l.category === 'Saving')?.id || 'income-expenses'}
-              title="Saving Sensei"
-              description="Discover strategies to save money effectively"
-              icon={<PiggyBank color={Colors.accent.teal} size={24} />}
-              progress={lessonProgress['Saving'] ? lessonProgress['Saving'].completed / lessonProgress['Saving'].total : 0}
-              lessons={lessonProgress['Saving']?.total || 1}
-              completedLessons={lessonProgress['Saving']?.completed || 0}
-              belt="yellow"
-              locked={false}
-            />
-            
-            {/* Credit Dojo */}
-            <LessonCard
-              id={actualLessons.find(l => l.category === 'Credit')?.id || 'fifty-thirty-twenty'}
-              title="Credit Card Master"
-              description="Use credit responsibly and build your score"
-              icon={<CreditCard color={Colors.accent.teal} size={24} />}
-              progress={lessonProgress['Credit'] ? lessonProgress['Credit'].completed / lessonProgress['Credit'].total : 0}
-              lessons={lessonProgress['Credit']?.total || 1}
-              completedLessons={lessonProgress['Credit']?.completed || 0}
-              belt="white"
-              locked={false}
-            />
-            
-            {/* Investing Dojo - Locked */}
-            <LessonCard
-              id={actualLessons.find(l => l.category === 'Investing')?.id || 'tracking-expenses'}
-              title="Investing 101"
-              description="Start your journey into investing"
-              icon={<TrendingUp color={Colors.text.tertiary} size={24} />}
-              progress={lessonProgress['Investing'] ? lessonProgress['Investing'].completed / lessonProgress['Investing'].total : 0}
-              lessons={lessonProgress['Investing']?.total || 1}
-              completedLessons={lessonProgress['Investing']?.completed || 0}
-              belt="white"
-              locked={true}
-            />
-            
-            {/* Taxes Dojo - Locked */}
-            <LessonCard
-              id={actualLessons.find(l => l.category === 'Emergency Planning')?.id || 'budget-challenge'}
-              title="Tax Tactics"
-              description="Understand taxes and maximize returns"
-              icon={<BadgeDollarSign color={Colors.text.tertiary} size={24} />}
-              progress={lessonProgress['Emergency Planning'] ? lessonProgress['Emergency Planning'].completed / lessonProgress['Emergency Planning'].total : 0}
-              lessons={lessonProgress['Emergency Planning']?.total || 1}
-              completedLessons={lessonProgress['Emergency Planning']?.completed || 0}
-              belt="white"
-              locked={true}
-            />
-            
-            {/* Advanced Investing - Locked */}
-            <LessonCard
-              id="advanced-investing"
-              title="Advanced Investing"
-              description="Level up your investment strategies"
-              icon={<LineChart color={Colors.text.tertiary} size={24} />}
-              progress={0}
-              lessons={1}
-              completedLessons={0}
-              belt="white"
-              locked={true}
-            />
+            {uncompletedLessons.map(lesson => (
+              <LessonCard
+                key={lesson.id}
+                id={lesson.id}
+                title={lesson.title}
+                description={lesson.description}
+                icon={<Wallet color={Colors.accent.teal} size={24} />}
+                progress={0}
+                lessons={1}
+                completedLessons={0}
+                belt={lesson.belt_required || 'white'}
+                locked={false}
+              />
+            ))}
           </View>
         </View>
         
@@ -368,6 +416,51 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Daily Quiz Modal/Overlay */}
+      {showDailyQuiz && (
+        <View style={styles.dailyQuizOverlay}>
+          <View style={styles.dailyQuizModal}>
+            {dailyQuizLoading ? (
+              <Text>Loading...</Text>
+            ) : dailyQuizAlreadyCompleted ? (
+              <>
+                <Text style={styles.dailyQuizTitle}>You've already completed today's quiz!</Text>
+                <TouchableOpacity style={styles.dailyQuizButton} onPress={handleCloseDailyQuiz}>
+                  <Text style={styles.dailyQuizButtonText}>Go Home</Text>
+                </TouchableOpacity>
+              </>
+            ) : dailyQuizData ? (
+              <>
+                <Text style={styles.dailyQuizTitle}>{dailyQuizData.title}</Text>
+                <Text style={styles.dailyQuizQuestion}>{dailyQuizData.questions[0].question}</Text>
+                {dailyQuizData.questions[0].options.map((opt: string, idx: number) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.dailyQuizOption, selectedAnswer === idx && (quizCorrect ? styles.dailyQuizOptionCorrect : styles.dailyQuizOptionWrong)]}
+                    onPress={() => handleDailyQuizAnswer(idx)}
+                    disabled={selectedAnswer !== null}
+                  >
+                    <Text style={styles.dailyQuizOptionText}>{opt}</Text>
+                  </TouchableOpacity>
+                ))}
+                {showQuizResult && (
+                  <TouchableOpacity style={styles.dailyQuizButton} onPress={handleCloseDailyQuiz}>
+                    <Text style={styles.dailyQuizButtonText}>Go Home</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={styles.dailyQuizTitle}>No quiz available today.</Text>
+                <TouchableOpacity style={styles.dailyQuizButton} onPress={handleCloseDailyQuiz}>
+                  <Text style={styles.dailyQuizButtonText}>Go Home</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -560,5 +653,64 @@ const styles = StyleSheet.create({
   boltLogoImage: {
     width: 70,
     height: 70,
+  },
+  dailyQuizOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dailyQuizModal: {
+    backgroundColor: Colors.background.primary,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    width: '80%',
+    maxHeight: '80%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dailyQuizTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: FONT_SIZE.xl,
+    color: Colors.text.primary,
+    marginBottom: SPACING.md,
+  },
+  dailyQuizQuestion: {
+    fontFamily: 'Inter-Regular',
+    fontSize: FONT_SIZE.md,
+    color: Colors.text.primary,
+    marginBottom: SPACING.md,
+  },
+  dailyQuizOption: {
+    padding: SPACING.md,
+    borderWidth: 2,
+    borderColor: Colors.accent.yellow,
+    borderRadius: BORDER_RADIUS.full,
+    marginBottom: SPACING.md,
+  },
+  dailyQuizOptionCorrect: {
+    borderColor: Colors.accent.green,
+  },
+  dailyQuizOptionWrong: {
+    borderColor: Colors.accent.red,
+  },
+  dailyQuizOptionText: {
+    fontFamily: 'Inter-Regular',
+    fontSize: FONT_SIZE.md,
+    color: Colors.text.primary,
+  },
+  dailyQuizButton: {
+    padding: SPACING.md,
+    backgroundColor: Colors.accent.yellow,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  dailyQuizButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: FONT_SIZE.md,
+    color: Colors.background.primary,
   },
 });

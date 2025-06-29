@@ -16,7 +16,7 @@
       "package": "com.doughjo.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#1A1A1A"
+        "backgroundColor": "transparent"
       }
     },
     "web": {
@@ -36,6 +36,15 @@
       "router": {},
       "eas": {
         "projectId": "c409fb6f-e3e7-422f-9405-d2e99cbe4dfe"
+      }
+    }
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
       }
     }
   }

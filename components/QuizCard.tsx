@@ -21,9 +21,10 @@ interface Quiz {
 
 interface QuizCardProps {
   quiz: Quiz;
+  onPress?: () => void;
 }
 
-export function QuizCard({ quiz }: QuizCardProps) {
+export function QuizCard({ quiz, onPress }: QuizCardProps) {
   const { isQuizCompleted, completeQuiz, getTimeUntilReset } = useDailyQuiz();
   const { playSound } = useSound();
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
@@ -49,8 +50,11 @@ export function QuizCard({ quiz }: QuizCardProps) {
 
   const handleCardPress = () => {
     if (completed) return;
-    // Navigate to challenge details page
-    router.push(`/challenge/${quiz.id}`);
+    if (onPress) {
+      onPress();
+    } else {
+      router.push(`/challenge/${quiz.id}`);
+    }
   };
 
   const getDifficultyColor = (difficulty: string) => {

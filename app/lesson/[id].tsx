@@ -8,7 +8,9 @@ import {
   TouchableOpacity, 
   Image,
   Animated,
-  Alert
+  Alert,
+  SafeAreaView,
+  StatusBar
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import Colors from '@/constants/Colors';
@@ -17,7 +19,7 @@ import { ArrowLeft, ArrowRight, BookOpen, Trophy, Star, Check, Circle, Flame, Aw
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 interface LessonPage {
   id: string;
@@ -36,213 +38,49 @@ interface LessonPage {
 export default function LessonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { profile, updateProfile, refreshProfile } = useAuth();
+  const [lesson, setLesson] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [showBeltReward, setShowBeltReward] = useState(false);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  const [showResult, setShowResult] = useState(false);
+  const [score, setScore] = useState(0);
+  const [quizCompleted, setQuizCompleted] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [selectedAnswers, setSelectedAnswers] = useState<(number | null)[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [completedPages, setCompletedPages] = useState<Set<number>>(new Set());
-  const [showBeltReward, setShowBeltReward] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  
+  // Quiz state management
+  const [hearts, setHearts] = useState(3);
+  const [showWrongAnswer, setShowWrongAnswer] = useState(false);
+  const [correctAnswer, setCorrectAnswer] = useState<number | null>(null);
+  const [answeredQuestions, setAnsweredQuestions] = useState<Set<number>>(new Set());
+  const [wrongAnswers, setWrongAnswers] = useState<Set<number>>(new Set());
+  const [showExplanation, setShowExplanation] = useState(false);
 
-  // Get lesson data based on ID
-  const getLessonData = (lessonId: string): LessonPage[] => {
-    // Check if this is a UUID (from database) or a fallback string ID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    
-    if (uuidRegex.test(lessonId)) {
-      // This is a real lesson from the database, provide generic content
-      return [
-        {
-          id: 'intro',
-          type: 'intro',
-          title: 'Welcome to Your Financial Lesson',
-          content: 'You\'re about to learn important financial concepts that will help you build wealth and achieve your goals.',
-          image: 'https://images.pexels.com/photos/4386431/pexels-photo-4386431.jpeg?auto=compress&cs=tinysrgb&w=800'
-        },
-        {
-          id: 'content-1',
-          type: 'content',
-          title: 'Financial Knowledge',
-          content: 'This lesson contains valuable financial education content designed to improve your money management skills.',
-          highlight: 'Every lesson completed brings you closer to financial mastery.',
-          image: 'https://images.pexels.com/photos/4386370/pexels-photo-4386370.jpeg?auto=compress&cs=tinysrgb&w=800'
-        },
-        {
-          id: 'summary',
-          type: 'summary',
-          title: 'Lesson Complete!',
-          content: 'Congratulations! You\'ve completed this financial lesson and earned valuable knowledge plus rewards.',
-          highlight: 'Keep learning to advance your financial belt level!'
-        }
-      ];
-    }
-    
-    // Fallback content for string IDs (for development/testing)
-    switch (lessonId) {
-      case 'budget-intro':
-        return [
-          {
-            id: 'intro',
-            type: 'intro',
-            title: 'Welcome to Budgeting Basics',
-            content: 'Your journey to financial mastery begins here! Learn how to take control of your money with smart budgeting strategies.',
-            image: 'https://images.pexels.com/photos/4386431/pexels-photo-4386431.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'what-is-budget',
-            type: 'content',
-            title: 'What is a Budget?',
-            content: 'A budget is your financial roadmap. It helps you plan where your money goes before you spend it, ensuring you can afford your needs and reach your goals.',
-            highlight: 'Think of a budget as your money\'s GPS - it shows you the best route to your financial destination.',
-            image: 'https://images.pexels.com/photos/4386370/pexels-photo-4386370.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'why-budget',
-            type: 'content',
-            title: 'Why Budget?',
-            content: 'Budgeting gives you control over your money instead of wondering where it all went. It helps you save for goals, avoid debt, and reduce financial stress.',
-            tip: 'People who budget are 3x more likely to achieve their financial goals!'
-          },
-          {
-            id: 'budget-example',
-            type: 'example',
-            title: 'Real-Life Example',
-            content: 'Meet Sarah, a college student who started budgeting:',
-            example: {
-              scenario: 'Sarah earned $1,200/month from her part-time job but always ran out of money.',
-              solution: 'She created a budget: $600 for needs, $360 for wants, $240 for savings. Now she has an emergency fund and less stress!'
-            },
-            image: 'https://images.pexels.com/photos/4386339/pexels-photo-4386339.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'getting-started',
-            type: 'content',
-            title: 'Getting Started',
-            content: 'Start simple: Track your spending for one week. Write down every purchase, no matter how small. This awareness is the first step to financial control.',
-            tip: 'Use your phone\'s notes app or a simple notebook - the tool doesn\'t matter, consistency does!'
-          },
-          {
-            id: 'summary',
-            type: 'summary',
-            title: 'You\'re Ready!',
-            content: 'Congratulations! You now understand the basics of budgeting. Remember: a budget isn\'t about restricting yourself - it\'s about giving yourself permission to spend on what matters most.',
-            highlight: 'Your White Belt in Budgeting is earned! Ready for the next challenge?'
-          }
-        ];
-      
-      case 'income-expenses':
-        return [
-          {
-            id: 'intro',
-            type: 'intro',
-            title: 'Welcome to Saving Sensei',
-            content: 'Master the art of saving money and building wealth for your future. Learn proven strategies that work for any income level.',
-            image: 'https://images.pexels.com/photos/3943716/pexels-photo-3943716.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'saving-basics',
-            type: 'content',
-            title: 'Why Save Money?',
-            content: 'Saving money provides security, freedom, and opportunities. It\'s your safety net for emergencies and your ticket to achieving dreams.',
-            highlight: 'Every dollar saved is a dollar that works for your future self.',
-            image: 'https://images.pexels.com/photos/3943723/pexels-photo-3943723.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'emergency-fund',
-            type: 'content',
-            title: 'Emergency Fund Essentials',
-            content: 'An emergency fund covers unexpected expenses without derailing your finances. Start with $1,000, then build to 3-6 months of expenses.',
-            tip: 'Even $25 per month adds up to $300 in a year - start small and build the habit!'
-          },
-          {
-            id: 'saving-strategies',
-            type: 'example',
-            title: 'Smart Saving Strategies',
-            content: 'Here are proven methods to boost your savings:',
-            example: {
-              scenario: 'Alex wanted to save $2,400 in one year but struggled with discipline.',
-              solution: 'He automated $200/month transfers and used the 52-week challenge. By year-end, he had saved $2,678!'
-            }
-          },
-          {
-            id: 'automation',
-            type: 'content',
-            title: 'Automate Your Success',
-            content: 'Set up automatic transfers to your savings account. When saving happens automatically, you\'re more likely to stick with it.',
-            tip: 'Pay yourself first - save before you spend on anything else!'
-          },
-          {
-            id: 'summary',
-            type: 'summary',
-            title: 'Saving Sensei Complete!',
-            content: 'You\'ve learned the fundamentals of saving money. Remember: consistency beats perfection. Start where you are, use what you have, do what you can.',
-            highlight: 'Your Yellow Belt in Saving is earned! Keep building those money muscles!'
-          }
-        ];
-      
-      case 'fifty-thirty-twenty':
-        return [
-          {
-            id: 'intro',
-            type: 'intro',
-            title: 'Welcome to Credit Card Master',
-            content: 'Learn to use credit cards responsibly and build an excellent credit score. Master the tools that can either help or hurt your financial future.',
-            image: 'https://images.pexels.com/photos/4386467/pexels-photo-4386467.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'credit-basics',
-            type: 'content',
-            title: 'Credit Cards Explained',
-            content: 'Credit cards are powerful financial tools that let you borrow money for purchases. Used wisely, they build credit and offer rewards. Used poorly, they create debt.',
-            highlight: 'Credit cards are like fire - incredibly useful when controlled, dangerous when not.',
-            image: 'https://images.pexels.com/photos/4386433/pexels-photo-4386433.jpeg?auto=compress&cs=tinysrgb&w=800'
-          },
-          {
-            id: 'credit-score',
-            type: 'content',
-            title: 'Building Your Credit Score',
-            content: 'Your credit score affects loan rates, apartment approvals, and even job opportunities. Pay on time, keep balances low, and be patient.',
-            tip: 'Payment history is 35% of your credit score - never miss a payment!'
-          },
-          {
-            id: 'responsible-use',
-            type: 'example',
-            title: 'Responsible Credit Use',
-            content: 'See how smart credit card use builds wealth:',
-            example: {
-              scenario: 'Maria used her credit card for all purchases but struggled with growing balances.',
-              solution: 'She started paying the full balance monthly and earned $300 in cashback rewards while building excellent credit!'
-            }
-          },
-          {
-            id: 'avoiding-debt',
-            type: 'content',
-            title: 'Avoiding Credit Card Debt',
-            content: 'The key to credit card success: never spend more than you can pay off immediately. Treat your credit card like a debit card.',
-            tip: 'If you can\'t afford to pay cash for it, you can\'t afford to put it on credit!'
-          },
-          {
-            id: 'summary',
-            type: 'summary',
-            title: 'Credit Master Complete!',
-            content: 'You now understand how to use credit cards responsibly. Remember: credit cards are tools, not free money. Use them wisely to build wealth, not debt.',
-            highlight: 'Your White Belt in Credit is earned! Use this power responsibly!'
-          }
-        ];
-      
-      default:
-        return [
-          {
-            id: 'placeholder',
-            type: 'intro',
-            title: 'Lesson Coming Soon',
-            content: 'This lesson is being prepared for you. Check back soon for more financial wisdom!',
-            image: 'https://images.pexels.com/photos/4386431/pexels-photo-4386431.jpeg?auto=compress&cs=tinysrgb&w=800'
-          }
-        ];
-    }
-  };
-
-  const lessonPages = getLessonData(id || 'budget-intro');
+  useEffect(() => {
+    const fetchLesson = async () => {
+      if (!id) return;
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (error) {
+        console.error('Error fetching lesson:', error);
+        setLesson(null);
+      } else {
+        setLesson(data);
+      }
+      setLoading(false);
+    };
+    fetchLesson();
+  }, [id]);
 
   useEffect(() => {
     // Animate page entrance
@@ -261,13 +99,23 @@ export default function LessonScreen() {
     ]).start();
   }, [currentPage]);
 
+  useEffect(() => {
+    if (lesson?.content?.type === 'quiz_lesson') {
+      setCurrentQuestionIndex(0);
+      setSelectedAnswer(null);
+      setShowResult(false);
+      setScore(0);
+      setQuizCompleted(false);
+    }
+  }, [lesson]);
+
   const handlePageComplete = (pageIndex: number) => {
     const newCompleted = new Set(completedPages);
     newCompleted.add(pageIndex);
     setCompletedPages(newCompleted);
 
     // If all pages completed, show belt reward
-    if (newCompleted.size === lessonPages.length) {
+    if (newCompleted.size === lesson.content.length) {
       handleLessonCompletion();
     }
   };
@@ -277,36 +125,28 @@ export default function LessonScreen() {
     
     console.log('Starting lesson completion for lesson:', id, 'user:', profile.id);
     
-    // Validate that the lesson ID is a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(id as string)) {
-      console.error('Invalid lesson ID format:', id);
-      // For non-UUID IDs (development/fallback), just show the completion modal
-      setShowBeltReward(true);
-      return;
-    }
-    
     try {
       // Record lesson completion in user_progress table
       // This will trigger the database functions to award coins and update streaks
       const { error } = await supabase
         .from('user_progress')
-        .upsert({
-          user_id: profile.id,
-          lesson_id: id as string, // This should be a valid lesson UUID from the database
-          completed: true,
-          progress: 1.0,
-          time_spent: 300, // 5 minutes estimated
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }, {
+        .upsert([
+          {
+            user_id: profile.id,
+            lesson_id: id,
+            completed: true,
+            progress: 1.0,
+            time_spent: 300, // 5 minutes estimated
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        ], {
           onConflict: 'user_id,lesson_id'
         });
 
       if (error) {
         console.error('Supabase error details:', error);
-        console.error('Error recording lesson completion:', error);
-        Alert.alert('Error', 'Failed to save lesson progress');
+        Alert.alert('Error', JSON.stringify(error));
         return;
       }
 
@@ -316,6 +156,7 @@ export default function LessonScreen() {
       
       // Show completion modal
       setShowBeltReward(true);
+      setShowConfetti(true);
       
     } catch (error) {
       console.error('Error completing lesson:', error);
@@ -324,7 +165,7 @@ export default function LessonScreen() {
   };
 
   const goToNextPage = () => {
-    if (currentPage < lessonPages.length - 1) {
+    if (currentPage < lesson.content.length - 1) {
       handlePageComplete(currentPage);
       setCurrentPage(currentPage + 1);
       scrollViewRef.current?.scrollTo({ x: (currentPage + 1) * screenWidth, animated: true });
@@ -340,9 +181,170 @@ export default function LessonScreen() {
     }
   };
 
+  // Render quiz lesson
+  if (lesson.content?.type === 'quiz_lesson') {
+    const questions = lesson.content.questions;
+    const currentQuestion = questions[currentQuestionIndex];
+    const totalQuestions = questions.length;
+    const correctIdx = currentQuestion.correct_answer ?? currentQuestion.correctAnswer;
+
+    // Move handlers here so they have access to correctIdx
+    const handleAnswer = (idx: number) => {
+      if (selectedAnswer === correctIdx) return; // Already correct, do nothing
+      if (idx === correctIdx) {
+        setSelectedAnswer(idx);
+        setShowResult(true);
+        setScore(score + 1);
+      } else {
+        setWrongAnswers(prev => new Set(prev).add(idx));
+        setShowResult(true);
+        // Do not set selectedAnswer, so user can try again
+      }
+    };
+
+    const handleContinue = async () => {
+      setWrongAnswers(new Set());
+      if (currentQuestionIndex < totalQuestions - 1) {
+        setCurrentQuestionIndex(currentQuestionIndex + 1);
+        setSelectedAnswer(null);
+        setShowResult(false);
+        setShowExplanation(false);
+      } else {
+        // Complete lesson
+        setQuizCompleted(true);
+        setShowBeltReward(true);
+        setShowConfetti(true);
+        // Mark as completed in DB
+        if (profile && id) {
+          await supabase
+            .from('user_progress')
+            .upsert([
+              {
+                user_id: profile.id,
+                lesson_id: id,
+                completed: true,
+                progress: 1.0,
+                time_spent: 120,
+                completed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }
+            ], { onConflict: 'user_id,lesson_id' });
+          await refreshProfile();
+        }
+      }
+    };
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor={Colors.background.primary} />
+        {!quizCompleted ? (
+          <View style={[styles.quizContainer, {paddingHorizontal: 24, paddingTop: 32}]}>
+            <Text style={[styles.lessonTitle, {marginTop: 0}]}>{lesson.title}</Text>
+            <Text style={styles.lessonDescription}>{lesson.description}</Text>
+            <Text style={styles.progressText}>{currentQuestionIndex + 1} of {totalQuestions}</Text>
+            <View style={[styles.questionCard, {marginTop: 16}]}>
+              <Text style={styles.questionText}>{currentQuestion.question}</Text>
+              <View style={[styles.optionsContainer, {marginTop: 16}]}>
+                {currentQuestion.options.map((opt: string, idx: number) => {
+                  let optionStyle = styles.optionButton;
+                  let textStyle = styles.optionButtonText;
+                  let disabled = false;
+                  if (selectedAnswer === correctIdx) {
+                    if (idx === correctIdx) {
+                      optionStyle = { ...styles.optionButton, ...styles.optionButtonCorrect };
+                      textStyle = { ...styles.optionButtonText, ...styles.optionButtonTextCorrect };
+                    } else if (wrongAnswers.has(idx)) {
+                      optionStyle = { ...styles.optionButton, ...styles.optionButtonWrong };
+                      textStyle = { ...styles.optionButtonText, ...styles.optionButtonTextWrong };
+                      disabled = true;
+                    } else {
+                      disabled = true;
+                    }
+                  } else if (wrongAnswers.has(idx)) {
+                    optionStyle = { ...styles.optionButton, ...styles.optionButtonWrong };
+                    textStyle = { ...styles.optionButtonText, ...styles.optionButtonTextWrong };
+                    disabled = true;
+                  }
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      style={optionStyle}
+                      onPress={() => handleAnswer(idx)}
+                      disabled={disabled}
+                    >
+                      <Text style={textStyle}>{opt}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {/* Feedback and retry logic */}
+              {showResult && (
+                <>
+                  {selectedAnswer !== correctIdx && (
+                    <>
+                      <Text style={styles.incorrectResult}>💡 Not quite right. Try again!</Text>
+                      <TouchableOpacity
+                        style={[styles.retryButton, {marginTop: 8, alignSelf: 'center'}]}
+                        onPress={() => {
+                          setShowResult(false);
+                          setSelectedAnswer(null);
+                          setWrongAnswers(new Set());
+                        }}
+                      >
+                        <Text style={styles.retryButtonText}>Retry</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  {selectedAnswer === correctIdx && (
+                    <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+                      <Text style={styles.continueButtonText}>
+                        {currentQuestionIndex < totalQuestions - 1 ? 'Continue' : 'Finish Lesson'}
+                      </Text>
+                      <ArrowRight color={Colors.background.primary} size={20} />
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </View>
+          </View>
+        ) : (
+          // Show congrats modal (existing modal)
+          <View style={styles.rewardOverlay}>
+            {showConfetti && (
+              <View style={styles.confettiContainer}>
+                <Text style={styles.confetti}>🎉🎊✨🎉🎊✨</Text>
+              </View>
+            )}
+            <View style={styles.rewardModal}>
+              <View style={styles.rewardIcon}>
+                <Award color={Colors.accent.yellow} size={48} />
+              </View>
+              <Text style={styles.rewardTitle}>Congratulations!</Text>
+              <Text style={styles.rewardText}>You've completed this lesson and earned 50 Dough Coins.</Text>
+              <View style={styles.rewardStats}>
+                <Text style={styles.rewardStat}>+50 Dough Coins</Text>
+                <Text style={styles.rewardStat}>+1 Lesson Complete</Text>
+              </View>
+              <TouchableOpacity 
+                style={styles.rewardButton}
+                onPress={() => {
+                  setShowBeltReward(false);
+                  setShowConfetti(false);
+                  router.replace('/');
+                }}
+              >
+                <Text style={styles.rewardButtonText}>Go Home</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // Place this before the main return statement, outside the quiz lesson block:
   const renderPage = (page: LessonPage, index: number) => {
     const isCompleted = completedPages.has(index);
-    
     return (
       <Animated.View 
         key={page.id}
@@ -367,24 +369,20 @@ export default function LessonScreen() {
               </Text>
             </View>
             <View style={styles.pageNumber}>
-              <Text style={styles.pageNumberText}>{index + 1}/{lessonPages.length}</Text>
+              <Text style={styles.pageNumberText}>{index + 1}/{lesson.content.length}</Text>
             </View>
           </View>
-
           {/* Page Image */}
           {page.image && (
             <View style={styles.imageContainer}>
-              <Image source={{ uri: page.image }} style={styles.pageImage} />
+              <Image source={{ uri: page.image }} style={styles.pageImage} resizeMode="cover" />
               <View style={styles.imageOverlay} />
             </View>
           )}
-
           {/* Page Title */}
           <Text style={styles.pageTitle}>{page.title}</Text>
-
           {/* Page Content */}
           <Text style={styles.pageText}>{page.content}</Text>
-
           {/* Highlight Box */}
           {page.highlight && (
             <View style={styles.highlightBox}>
@@ -392,7 +390,6 @@ export default function LessonScreen() {
               <Text style={styles.highlightText}>{page.highlight}</Text>
             </View>
           )}
-
           {/* Tip Box */}
           {page.tip && (
             <View style={styles.tipBox}>
@@ -402,7 +399,6 @@ export default function LessonScreen() {
               <Text style={styles.tipText}>{page.tip}</Text>
             </View>
           )}
-
           {/* Example Box */}
           {page.example && (
             <View style={styles.exampleBox}>
@@ -417,7 +413,6 @@ export default function LessonScreen() {
               </View>
             </View>
           )}
-
           {/* Completion Status */}
           <View style={styles.completionContainer}>
             {isCompleted ? (
@@ -433,7 +428,6 @@ export default function LessonScreen() {
             )}
           </View>
         </ScrollView>
-
         {/* Page Navigation */}
         <View style={styles.pageNavigation}>
           {currentPage > 0 && (
@@ -442,10 +436,8 @@ export default function LessonScreen() {
               <Text style={styles.navButtonText}>Previous</Text>
             </TouchableOpacity>
           )}
-          
           <View style={styles.navSpacer} />
-          
-          {currentPage < lessonPages.length - 1 ? (
+          {currentPage < lesson.content.length - 1 ? (
             <TouchableOpacity style={styles.continueButton} onPress={goToNextPage}>
               <Text style={styles.continueButtonText}>Continue</Text>
               <ArrowRight color={Colors.background.primary} size={20} />
@@ -461,8 +453,10 @@ export default function LessonScreen() {
     );
   };
 
+  // Render other lesson types as needed
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor={Colors.background.secondary} />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -476,7 +470,7 @@ export default function LessonScreen() {
         
         <View style={styles.headerProgress}>
           <Flame color={Colors.accent.orange} size={20} />
-          <Text style={styles.headerProgressText}>{completedPages.size}/{lessonPages.length}</Text>
+          <Text style={styles.headerProgressText}>{completedPages.size}/{lesson.content.length}</Text>
         </View>
       </View>
 
@@ -486,7 +480,7 @@ export default function LessonScreen() {
           <View 
             style={[
               styles.progressFill, 
-              { width: `${(completedPages.size / lessonPages.length) * 100}%` }
+              { width: `${(completedPages.size / lesson.content.length) * 100}%` }
             ]} 
           />
         </View>
@@ -501,20 +495,24 @@ export default function LessonScreen() {
         scrollEnabled={false}
         style={styles.pagesContainer}
       >
-        {lessonPages.map((page, index) => renderPage(page, index))}
+        {lesson.content.map((page: any, index: number) => renderPage(page, index))}
       </ScrollView>
 
       {/* Belt Reward Modal */}
       {showBeltReward && (
         <View style={styles.rewardOverlay}>
+          {/* Confetti Animation (simple emoji burst) */}
+          {showConfetti && (
+            <View style={styles.confettiContainer}>
+              <Text style={styles.confetti}>🎉🎊✨🎉🎊✨</Text>
+            </View>
+          )}
           <View style={styles.rewardModal}>
             <View style={styles.rewardIcon}>
               <Award color={Colors.accent.yellow} size={48} />
             </View>
-            <Text style={styles.rewardTitle}>Lesson Complete!</Text>
-            <Text style={styles.rewardText}>
-              Congratulations! You've completed this lesson and earned 50 Dough Coins.
-            </Text>
+            <Text style={styles.rewardTitle}>Congratulations!</Text>
+            <Text style={styles.rewardText}>You've completed this lesson and earned 50 Dough Coins.</Text>
             <View style={styles.rewardStats}>
               <Text style={styles.rewardStat}>+50 Dough Coins</Text>
               <Text style={styles.rewardStat}>+1 Lesson Complete</Text>
@@ -523,15 +521,16 @@ export default function LessonScreen() {
               style={styles.rewardButton}
               onPress={() => {
                 setShowBeltReward(false);
-                router.back();
+                setShowConfetti(false);
+                router.replace('/'); // Go to home screen
               }}
             >
-              <Text style={styles.rewardButtonText}>Continue Journey</Text>
+              <Text style={styles.rewardButtonText}>Continue</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -540,11 +539,333 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background.primary,
   },
+  quizContainer: {
+    flex: 1,
+  },
+  quizScrollContent: {
+    paddingBottom: 60,
+  },
+  quizContent: {
+    padding: SPACING.lg,
+  },
+  coverImageContainer: {
+    position: 'relative',
+    width: '100%',
+    height: Math.min(screenHeight * 0.25, 200),
+    marginBottom: SPACING.lg,
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  coverImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    borderRadius: BORDER_RADIUS.lg,
+  },
+  lessonTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.xxl, screenWidth * 0.06),
+    color: Colors.text.primary,
+    marginBottom: SPACING.sm,
+    textAlign: 'left',
+    lineHeight: Math.max(FONT_SIZE.xxl * 1.3, screenWidth * 0.08),
+    maxWidth: screenWidth * 0.6,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
+  lessonDescription: {
+    fontFamily: 'Inter-Regular',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.045),
+    color: Colors.text.secondary,
+    marginBottom: SPACING.lg,
+    textAlign: 'left',
+    lineHeight: Math.max(FONT_SIZE.lg * 1.5, screenWidth * 0.07),
+    maxWidth: screenWidth * 0.6,
+    flexShrink: 1,
+    flexWrap: 'wrap',
+  },
+  progressContainer: {
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
+    paddingHorizontal: SPACING.md,
+  },
+  progressBar: {
+    width: '100%',
+    height: 8,
+    backgroundColor: Colors.background.tertiary,
+    borderRadius: BORDER_RADIUS.full,
+    marginBottom: SPACING.sm,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.accent.teal,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  progressText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.accent.teal,
+  },
+  questionCard: {
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  questionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.lg,
+  },
+  questionNumberBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: Colors.accent.teal,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: SPACING.md,
+    marginTop: 2,
+  },
+  questionNumberText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: FONT_SIZE.md,
+    color: Colors.background.primary,
+  },
+  questionText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
+    color: Colors.text.primary,
+    flex: 1,
+    lineHeight: Math.max(FONT_SIZE.lg * 1.4, screenWidth * 0.056),
+  },
+  optionsContainer: {
+    gap: SPACING.sm,
+  },
+  optionButton: {
+    backgroundColor: Colors.background.primary,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    borderWidth: 2,
+    borderColor: Colors.background.tertiary,
+    minHeight: 56,
+  },
+  optionButtonSelected: {
+    backgroundColor: Colors.accent.teal + '15',
+    borderColor: Colors.accent.teal,
+  },
+  optionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  optionRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 2,
+    borderColor: Colors.text.tertiary,
+    marginRight: SPACING.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  optionRadioSelected: {
+    borderColor: Colors.accent.teal,
+    backgroundColor: Colors.accent.teal,
+  },
+  optionRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: Colors.background.primary,
+  },
+  optionButtonText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.text.primary,
+    flex: 1,
+    lineHeight: Math.max(FONT_SIZE.md * 1.4, screenWidth * 0.049),
+  },
+  optionButtonTextSelected: {
+    color: Colors.accent.teal,
+    fontFamily: 'Inter-Bold',
+  },
+  optionButtonCorrect: {
+    backgroundColor: Colors.accent.green + '20',
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    borderWidth: 2,
+    borderColor: Colors.accent.green,
+    minHeight: 56,
+  },
+  optionButtonTextCorrect: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.accent.green,
+    flex: 1,
+    lineHeight: Math.max(FONT_SIZE.md * 1.4, screenWidth * 0.049),
+  },
+  optionButtonWrong: {
+    backgroundColor: Colors.accent.red + '20',
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    borderWidth: 2,
+    borderColor: Colors.accent.red,
+    minHeight: 56,
+  },
+  optionButtonTextWrong: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.accent.red,
+    flex: 1,
+    lineHeight: Math.max(FONT_SIZE.md * 1.4, screenWidth * 0.049),
+  },
+  correctIndicator: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
+    color: Colors.accent.green,
+    marginLeft: SPACING.sm,
+  },
+  wrongIndicator: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
+    color: Colors.accent.red,
+    marginLeft: SPACING.sm,
+  },
+  completeButton: {
+    backgroundColor: Colors.accent.teal,
+    borderRadius: BORDER_RADIUS.xl,
+    paddingVertical: SPACING.xl,
+    alignItems: 'center',
+    marginTop: SPACING.xl,
+    marginBottom: SPACING.md,
+    shadowColor: Colors.accent.teal,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+    minHeight: 60,
+  },
+  completeButtonDisabled: {
+    backgroundColor: Colors.background.tertiary,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  completeButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.xl, screenWidth * 0.045),
+    color: Colors.background.primary,
+  },
+  completeButtonTextDisabled: {
+    color: Colors.text.tertiary,
+  },
+  rewardOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  confettiContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 1001,
+  },
+  confetti: {
+    fontSize: Math.min(40, screenWidth * 0.1),
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  rewardModal: {
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.xl,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+    width: Math.min(320, screenWidth * 0.85),
+    maxWidth: 400,
+  },
+  rewardIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: Colors.accent.yellow + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  rewardTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.xl, screenWidth * 0.05),
+    color: Colors.text.primary,
+    textAlign: 'center',
+    marginBottom: SPACING.md,
+  },
+  rewardText: {
+    fontFamily: 'Inter-Regular',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
+    lineHeight: Math.max(FONT_SIZE.md * 1.5, screenWidth * 0.053),
+  },
+  rewardStats: {
+    flexDirection: 'row',
+    gap: SPACING.lg,
+    marginBottom: SPACING.xl,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  rewardStat: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.accent.teal,
+  },
+  rewardButton: {
+    backgroundColor: Colors.accent.teal,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.xl,
+    width: '100%',
+    alignItems: 'center',
+    marginTop: SPACING.md,
+    minHeight: 50,
+  },
+  rewardButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.background.primary,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 60,
+    paddingTop: 10,
     paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.md,
     backgroundColor: Colors.background.secondary,
@@ -563,7 +884,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.lg,
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
     color: Colors.text.primary,
   },
   headerProgress: {
@@ -577,24 +898,13 @@ const styles = StyleSheet.create({
   },
   headerProgressText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.sm,
+    fontSize: Math.max(FONT_SIZE.sm, screenWidth * 0.03),
     color: Colors.accent.orange,
   },
   progressBarContainer: {
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     backgroundColor: Colors.background.secondary,
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: Colors.background.tertiary,
-    borderRadius: BORDER_RADIUS.full,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.accent.teal,
-    borderRadius: BORDER_RADIUS.full,
   },
   pagesContainer: {
     flex: 1,
@@ -624,7 +934,7 @@ const styles = StyleSheet.create({
   },
   pageTypeText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.xs,
+    fontSize: Math.max(FONT_SIZE.xs, screenWidth * 0.025),
     color: Colors.accent.teal,
     textTransform: 'uppercase',
   },
@@ -636,7 +946,7 @@ const styles = StyleSheet.create({
   },
   pageNumberText: {
     fontFamily: 'Inter-Medium',
-    fontSize: FONT_SIZE.sm,
+    fontSize: Math.max(FONT_SIZE.sm, screenWidth * 0.03),
     color: Colors.text.secondary,
   },
   imageContainer: {
@@ -647,7 +957,7 @@ const styles = StyleSheet.create({
   },
   pageImage: {
     width: '100%',
-    height: 200,
+    height: Math.min(screenHeight * 0.25, 200),
     borderRadius: BORDER_RADIUS.xl,
   },
   imageOverlay: {
@@ -661,16 +971,16 @@ const styles = StyleSheet.create({
   },
   pageTitle: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.xxl,
+    fontSize: Math.max(FONT_SIZE.xxl, screenWidth * 0.06),
     color: Colors.text.primary,
     marginBottom: SPACING.lg,
-    lineHeight: FONT_SIZE.xxl * 1.3,
+    lineHeight: Math.max(FONT_SIZE.xxl * 1.3, screenWidth * 0.078),
   },
   pageText: {
     fontFamily: 'Inter-Regular',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.secondary,
-    lineHeight: FONT_SIZE.md * 1.6,
+    lineHeight: Math.max(FONT_SIZE.md * 1.6, screenWidth * 0.056),
     marginBottom: SPACING.lg,
   },
   highlightBox: {
@@ -685,11 +995,11 @@ const styles = StyleSheet.create({
   },
   highlightText: {
     fontFamily: 'Inter-Medium',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.primary,
     marginLeft: SPACING.md,
     flex: 1,
-    lineHeight: FONT_SIZE.md * 1.5,
+    lineHeight: Math.max(FONT_SIZE.md * 1.5, screenWidth * 0.053),
   },
   tipBox: {
     flexDirection: 'row',
@@ -713,10 +1023,10 @@ const styles = StyleSheet.create({
   },
   tipText: {
     fontFamily: 'Inter-Medium',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.primary,
     flex: 1,
-    lineHeight: FONT_SIZE.md * 1.5,
+    lineHeight: Math.max(FONT_SIZE.md * 1.5, screenWidth * 0.053),
   },
   exampleBox: {
     backgroundColor: Colors.background.secondary,
@@ -728,7 +1038,7 @@ const styles = StyleSheet.create({
   },
   exampleTitle: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.lg,
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
     color: Colors.text.primary,
     marginBottom: SPACING.md,
   },
@@ -740,15 +1050,15 @@ const styles = StyleSheet.create({
   },
   exampleLabel: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.sm,
+    fontSize: Math.max(FONT_SIZE.sm, screenWidth * 0.03),
     color: Colors.accent.magenta,
     marginBottom: SPACING.xs,
   },
   exampleText: {
     fontFamily: 'Inter-Regular',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.secondary,
-    lineHeight: FONT_SIZE.md * 1.5,
+    lineHeight: Math.max(FONT_SIZE.md * 1.5, screenWidth * 0.053),
   },
   completionContainer: {
     alignItems: 'center',
@@ -761,7 +1071,7 @@ const styles = StyleSheet.create({
   },
   completedText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.accent.green,
   },
   incompleteIndicator: {
@@ -771,7 +1081,7 @@ const styles = StyleSheet.create({
   },
   incompleteText: {
     fontFamily: 'Inter-Regular',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.tertiary,
   },
   pageNavigation: {
@@ -794,10 +1104,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     borderRadius: BORDER_RADIUS.lg,
     backgroundColor: Colors.background.secondary,
+    minHeight: 50,
   },
   navButtonText: {
     fontFamily: 'Inter-Medium',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.primary,
   },
   navSpacer: {
@@ -816,10 +1127,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    minHeight: 50,
   },
   continueButtonText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.background.primary,
   },
   finishButton: {
@@ -835,76 +1147,134 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 8,
+    minHeight: 50,
   },
   finishButtonText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.background.primary,
   },
-  rewardOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  center: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    backgroundColor: Colors.background.primary,
   },
-  rewardModal: {
-    backgroundColor: Colors.background.secondary,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
+  loadingContainer: {
     alignItems: 'center',
-    width: '100%',
-    maxWidth: 400,
-  },
-  rewardIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: Colors.accent.yellow + '20',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
+    padding: SPACING.xl,
   },
-  rewardTitle: {
+  loadingText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
+    color: Colors.text.secondary,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.xl,
+  },
+  errorText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.lg, screenWidth * 0.04),
+    color: Colors.text.secondary,
+  },
+  heartsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.lg,
+  },
+  heartsLabel: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.xl,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.primary,
-    textAlign: 'center',
+    marginRight: SPACING.md,
+  },
+  heartsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heart: {
+    width: 24,
+    height: 24,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: Colors.background.tertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: SPACING.xs,
+  },
+  heartActive: {
+    backgroundColor: Colors.accent.teal,
+  },
+  heartText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.text.primary,
+  },
+  heartTextActive: {
+    color: Colors.background.primary,
+  },
+  currentQuestionCard: {
+    backgroundColor: Colors.accent.teal + '10',
+  },
+  wrongAnswerFeedback: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: SPACING.lg,
+    backgroundColor: Colors.accent.red + '10',
+    borderRadius: BORDER_RADIUS.lg,
+    marginTop: SPACING.lg,
+  },
+  wrongAnswerText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.text.primary,
+  },
+  retryButton: {
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: Colors.accent.teal,
+  },
+  retryButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.background.primary,
+  },
+  gameOverContainer: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: SPACING.xl,
+  },
+  gameOverTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: Math.max(FONT_SIZE.xl, screenWidth * 0.05),
+    color: Colors.text.primary,
     marginBottom: SPACING.md,
   },
-  rewardText: {
+  gameOverText: {
     fontFamily: 'Inter-Regular',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.text.secondary,
+    marginBottom: SPACING.lg,
     textAlign: 'center',
-    lineHeight: FONT_SIZE.md * 1.5,
-    marginBottom: SPACING.xl,
   },
-  rewardStats: {
-    flexDirection: 'row',
-    gap: SPACING.lg,
-    marginBottom: SPACING.xl,
-  },
-  rewardStat: {
-    fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
-    color: Colors.accent.teal,
-  },
-  rewardButton: {
+  restartButton: {
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.full,
     backgroundColor: Colors.accent.teal,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
-    width: '100%',
-    alignItems: 'center',
   },
-  rewardButtonText: {
+  restartButtonText: {
     fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
     color: Colors.background.primary,
+  },
+  incorrectResult: {
+    fontFamily: 'Inter-Medium',
+    fontSize: Math.max(FONT_SIZE.md, screenWidth * 0.035),
+    color: Colors.text.primary,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.lg,
   },
 });

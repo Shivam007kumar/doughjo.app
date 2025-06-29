@@ -52,14 +52,28 @@ export default function LearnScreen() {
   const [loading, setLoading] = useState(true);
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Animation values
   const progressWidth = useSharedValue(0);
   const heartScale = useSharedValue(1);
 
+  // UI state
+  const [uiState, setUiState] = useState<'inProgress' | 'completed' | 'failed'>('inProgress');
+
   useEffect(() => {
     // Don't load lesson immediately, wait for loading screen
   }, []);
+
+  useEffect(() => {
+    if (hearts <= 0 && !lessonComplete) {
+      setUiState('failed');
+    } else if (lessonComplete) {
+      setUiState('completed');
+    } else {
+      setUiState('inProgress');
+    }
+  }, [hearts, lessonComplete]);
 
   const handleLoadingComplete = () => {
     setShowLoadingScreen(false);
@@ -78,36 +92,29 @@ export default function LearnScreen() {
       setLoading(true);
       setError(null);
       
-      console.log('Starting to load lesson...');
-      
-      // Since API routes aren't working in web preview, use direct Supabase connection
+      // Restore direct Supabase DB call
       const { supabase } = await import('@/lib/supabase');
-      
       const { data: lessons, error } = await supabase
         .from('lessons')
         .select('*')
         .order('order_index');
-      
       if (error) {
         throw new Error(`Database error: ${error.message}`);
       }
-      
-      if (lessons.length === 0) {
+      if (!Array.isArray(lessons) || lessons.length === 0) {
         throw new Error('No lessons available');
       }
-      
-      // Select a random lesson
-      const randomLesson = lessons[Math.floor(Math.random() * lessons.length)];
-      console.log('Selected lesson:', randomLesson);
-      
-      // Validate lesson structure
-      if (!randomLesson.content || !randomLesson.content.questions || randomLesson.content.questions.length === 0) {
-        throw new Error('Invalid lesson structure - no questions found');
+      // Only select lessons with questions
+      const lessonsWithQuestions = lessons.filter(
+        l => l.content && Array.isArray(l.content.questions) && l.content.questions.length > 0
+      );
+      if (!Array.isArray(lessonsWithQuestions) || lessonsWithQuestions.length === 0) {
+        throw new Error('No quiz lessons available');
       }
-      
+      // Select a random quiz lesson
+      const randomLesson = lessonsWithQuestions[Math.floor(Math.random() * lessonsWithQuestions.length)];
       setCurrentLesson(randomLesson);
     } catch (error) {
-      console.error('Failed to load lesson:', error);
       setError(error instanceof Error ? error.message : 'Failed to load lesson content');
     } finally {
       setLoading(false);
@@ -205,16 +212,11 @@ export default function LearnScreen() {
   });
 
   const handleAnswerSelect = (answerIndex: number) => {
-    if (selectedAnswer !== null || !currentQuestion) return;
-    
+    if (selectedAnswer !== null || !currentQuestion || uiState !== 'inProgress') return;
     setSelectedAnswer(answerIndex);
     setShowResult(true);
-    
     const isCorrect = answerIndex === currentQuestion.correctAnswer;
-    
-    // Play sound effect
     playSound(isCorrect ? 'correct' : 'incorrect');
-    
     if (isCorrect) {
       setScore(score + 1);
     } else {
@@ -223,45 +225,36 @@ export default function LearnScreen() {
       heartScale.value = withSpring(1.2, {}, () => {
         heartScale.value = withSpring(1);
       });
+      // Do NOT mark lesson complete on wrong answer
     }
   };
 
   const handleContinue = async () => {
-    if (!currentLesson) return;
-
+    if (!currentLesson || uiState !== 'inProgress') return;
     if (currentQuestionIndex < currentLesson.content.questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
       setSelectedAnswer(null);
       setShowResult(false);
       setShowExplanation(false);
     } else {
-      // Lesson complete
+      // Lesson complete only if user finished all questions
       const earnedXP = currentLesson.content.xpReward;
       const completionPercentage = (score / currentLesson.content.questions.length) * 100;
-      
       setXpGained(earnedXP);
       setLessonComplete(true);
-      
-      // Check if this gives a streak (simplified - in real app, check if it's first lesson today)
-      const shouldGainStreak = completionPercentage >= 60; // 60% or better
-      setStreakGained(shouldGainStreak);
-      
-      // Update user profile with XP and potentially streak
+      setUiState('completed');
+      // ...rest of completion logic...
       if (profile) {
         const updates: any = {
           dough_coins: profile.dough_coins + earnedXP,
           total_lessons_completed: profile.total_lessons_completed + 1
         };
-        
-        if (shouldGainStreak) {
+        if (completionPercentage >= 60) {
           updates.streak_days = profile.streak_days + 1;
           updates.longest_streak = Math.max(profile.longest_streak, profile.streak_days + 1);
         }
-        
         await updateProfile(updates);
       }
-
-      // Update progress in backend
       await updateUserProgress(currentLesson.id, true, score);
     }
   };
@@ -335,10 +328,12 @@ export default function LearnScreen() {
 
   if (error) {
     return (
-      <DoughJoLoadingScreen 
-        onLoadingComplete={handleLoadingComplete}
-        showRetryAfter={2000}
-      />
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>Failed to load lesson: {error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => { setRetryCount(c => c + 1); setError(null); loadRandomLesson(); }}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
   
@@ -351,177 +346,215 @@ export default function LearnScreen() {
     );
   }
 
-  if (hearts <= 0 && !lessonComplete) {
+  if (uiState === 'failed') {
     return (
       <View style={styles.container}>
         <View style={styles.gameOverContainer}>
           <Text style={styles.gameOverTitle}>Out of Hearts!</Text>
           <Text style={styles.gameOverSubtitle}>Don't worry, you can try again</Text>
-          
           <View style={styles.statsContainer}>
             <Text style={styles.statsText}>Questions Answered: {currentQuestionIndex + 1}</Text>
             <Text style={styles.statsText}>Correct Answers: {score}</Text>
             <Text style={styles.statsText}>Accuracy: {Math.round((score / (currentQuestionIndex + 1)) * 100)}%</Text>
           </View>
-          
-          <TouchableOpacity style={styles.retryButton} onPress={resetLesson}>
-            <RotateCcw color={Colors.background.primary} size={20} />
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.exitButton} onPress={() => router.back()}>
-            <Text style={styles.exitButtonText}>Back to Home</Text>
-          </TouchableOpacity>
+          <View style={styles.modalButtonsColumn}>
+            <TouchableOpacity style={styles.wideButton} onPress={resetLesson}>
+              <Text style={styles.wideButtonText} numberOfLines={1} ellipsizeMode="tail">Try Again</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.wideButton, styles.newLessonWideButton]} onPress={() => router.back()}>
+              <Text style={styles.wideButtonText} numberOfLines={1} ellipsizeMode="tail">Go Home</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.exitBtn} onPress={handleExit}>
-          <X color={Colors.text.primary} size={24} />
-        </TouchableOpacity>
-        
-        {/* Topic Header */}
-        <View style={styles.topicHeader}>
-          <Text style={styles.topicTitle}>{currentLesson.category}</Text>
-          <Text style={styles.topicSubtitle}>{currentLesson.title}</Text>
-        </View>
-        
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-            <Animated.View 
-              style={[styles.progressFill, animatedProgressStyle]}
-            />
+  if (uiState === 'completed') {
+    return (
+      <View style={styles.modalOverlay}>
+        <View style={styles.completeModal}>
+          {/* Trophy Icon */}
+          <View style={styles.trophyContainer}>
+            <Trophy color={Colors.accent.yellow} size={48} />
           </View>
-          <Text style={styles.progressText}>
-            {currentQuestionIndex + 1} of {totalQuestions}
-          </Text>
+          {/* Stats */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: SPACING.lg }}>
+            <View style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={styles.completeTitle}>{score}</Text>
+              <Text style={styles.completeSubtitle}>Correct</Text>
+            </View>
+            <View style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={styles.completeTitle}>{totalQuestions}</Text>
+              <Text style={styles.completeSubtitle}>Total</Text>
+            </View>
+            <View style={{ alignItems: 'center', flex: 1 }}>
+              <Text style={styles.completeTitle}>{Math.round((score / totalQuestions) * 100) || 0}%</Text>
+              <Text style={styles.completeSubtitle}>Accuracy</Text>
+            </View>
+          </View>
+          {/* Rewards */}
+          <Text style={[styles.completeTitle, { marginBottom: SPACING.md }]}>Rewards Earned</Text>
+          <View style={styles.rewardsContainer}>
+            <View style={styles.xpContainer}>
+              <Text style={styles.xpText}>+{xpGained}</Text>
+              <Text style={styles.xpSubtext}>XP</Text>
+            </View>
+            {streakGained && (
+              <View style={styles.streakContainer}>
+                <Flame color={Colors.accent.orange} size={24} />
+                <Text style={styles.streakText}>Streak!</Text>
+              </View>
+            )}
+          </View>
+          {/* Buttons - now full width, stacked vertically */}
+          <View style={styles.modalButtonsColumn}>
+            <TouchableOpacity style={styles.wideButton} onPress={() => { setLessonComplete(false); setUiState('inProgress'); router.back(); }}>
+              <Text style={styles.wideButtonText}>Continue Journey</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.wideButton, styles.newLessonWideButton]} onPress={startNewLesson}>
+              <Text style={styles.wideButtonText}>New Lesson</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        
-        <Animated.View style={[styles.heartsContainer, animatedHeartStyle]}>
-          <Heart
-            size={24}
-            color={Colors.accent.red}
-            fill={Colors.accent.red}
-          />
-          <Text style={styles.heartsText}>{hearts}</Text>
-        </Animated.View>
       </View>
+    );
+  }
 
-      {/* Question */}
-      <View style={styles.questionContainer}>
-        <Animated.Text 
-          key={currentQuestion.id}
-          entering={FadeIn.duration(400)}
-          style={styles.questionText}
-        >
-          {currentQuestion.question}
-        </Animated.Text>
-        
-        {currentQuestion.category && (
-          <View style={styles.questionCategoryBadge}>
-            <Text style={styles.questionCategoryText}>{currentQuestion.category}</Text>
+  // Only render quiz UI if inProgress
+  if (uiState === 'inProgress') {
+    return (
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.exitBtn} onPress={handleExit}>
+            <X color={Colors.text.primary} size={24} />
+          </TouchableOpacity>
+          
+          {/* Topic Header */}
+          <View style={styles.topicHeader}>
+            <Text style={styles.topicTitle}>{currentLesson.category}</Text>
+            <Text style={styles.topicSubtitle}>{currentLesson.title}</Text>
           </View>
+          
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBar}>
+              <Animated.View 
+                style={[styles.progressFill, animatedProgressStyle]}
+              />
+            </View>
+            <Text style={styles.progressText}>
+              {currentQuestionIndex + 1} of {totalQuestions}
+            </Text>
+          </View>
+          
+          <Animated.View style={[styles.heartsContainer, animatedHeartStyle]}>
+            <Heart
+              size={24}
+              color={Colors.accent.red}
+              fill={Colors.accent.red}
+            />
+            <Text style={styles.heartsText}>{hearts}</Text>
+          </Animated.View>
+        </View>
+
+        {/* Question */}
+        <View style={styles.questionContainer}>
+          <Animated.Text 
+            key={currentQuestion.id}
+            entering={FadeIn.duration(400)}
+            style={styles.questionText}
+          >
+            {currentQuestion.question}
+          </Animated.Text>
+          
+          {currentQuestion.category && (
+            <View style={styles.questionCategoryBadge}>
+              <Text style={styles.questionCategoryText}>{currentQuestion.category}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Options */}
+        <View style={styles.optionsContainer}>
+          {currentQuestion.options.map((option, index) => {
+            let optionStyle = styles.option;
+            let textStyle = styles.optionText;
+            
+            if (showResult) {
+              if (index === currentQuestion.correctAnswer) {
+                optionStyle = { ...styles.option, ...styles.correctOption };
+                textStyle = { ...styles.optionText, ...styles.correctOptionText, fontWeight: "500" };
+              } else if (selectedAnswer === index) {
+                optionStyle = { ...styles.option, ...styles.incorrectOption };
+                textStyle = { ...styles.optionText, ...styles.incorrectOptionText, fontWeight: "500" };
+              }
+            } else if (selectedAnswer === index) {
+              optionStyle = { ...styles.option, ...styles.selectedOption };
+            }
+            
+            return (
+              <Animated.View
+                key={index}
+                entering={FadeIn.delay(index * 100).duration(300)}
+              >
+                <TouchableOpacity
+                  style={optionStyle}
+                  onPress={() => handleAnswerSelect(index)}
+                  disabled={selectedAnswer !== null}
+                >
+                  <Text style={textStyle}>{option}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
+        </View>
+
+        {/* Explanation */}
+        {showExplanation && currentQuestion.explanation && (
+          <Animated.View 
+            entering={FadeIn.duration(400)}
+            style={styles.explanationContainer}
+          >
+            <Text style={styles.explanationTitle}>
+              {selectedAnswer === currentQuestion.correctAnswer ? 'Correct! 🎉' : 'Not quite right 💡'}
+            </Text>
+            <Text style={styles.explanationText}>{currentQuestion.explanation}</Text>
+          </Animated.View>
+        )}
+
+        {/* Bottom Button */}
+        {showResult && (
+          <Animated.View 
+            entering={FadeIn.duration(400)}
+            style={styles.bottomContainer}
+          >
+            {!showExplanation ? (
+              <TouchableOpacity 
+                style={styles.continueButton} 
+                onPress={() => setShowExplanation(true)}
+              >
+                <Text style={styles.continueButtonText}>
+                  {selectedAnswer === currentQuestion.correctAnswer ? 'See Explanation' : 'Show Explanation'}
+                </Text>
+                <ArrowRight color={Colors.background.primary} size={20} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={styles.continueButton} 
+                onPress={handleContinue}
+              >
+                <Text style={styles.continueButtonText}>
+                  {currentQuestionIndex < currentLesson.content.questions.length - 1 ? 'Continue' : 'Finish Lesson'}
+                </Text>
+                <ArrowRight color={Colors.background.primary} size={20} />
+              </TouchableOpacity>
+            )}
+          </Animated.View>
         )}
       </View>
-
-      {/* Options */}
-      <View style={styles.optionsContainer}>
-        {currentQuestion.options.map((option, index) => {
-          let optionStyle = styles.option;
-          let textStyle = styles.optionText;
-          
-          if (showResult) {
-            if (index === currentQuestion.correctAnswer) {
-              optionStyle = { ...styles.option, ...styles.correctOption };
-              textStyle = { ...styles.optionText, ...styles.correctOptionText, fontWeight: "500" };
-            } else if (selectedAnswer === index) {
-              optionStyle = { ...styles.option, ...styles.incorrectOption };
-              textStyle = { ...styles.optionText, ...styles.incorrectOptionText, fontWeight: "500" };
-            }
-          } else if (selectedAnswer === index) {
-            optionStyle = { ...styles.option, ...styles.selectedOption };
-          }
-          
-          return (
-            <Animated.View
-              key={index}
-              entering={FadeIn.delay(index * 100).duration(300)}
-            >
-              <TouchableOpacity
-                style={optionStyle}
-                onPress={() => handleAnswerSelect(index)}
-                disabled={selectedAnswer !== null}
-              >
-                <Text style={textStyle}>{option}</Text>
-              </TouchableOpacity>
-            </Animated.View>
-          );
-        })}
-      </View>
-
-      {/* Explanation */}
-      {showExplanation && currentQuestion.explanation && (
-        <Animated.View 
-          entering={FadeIn.duration(400)}
-          style={styles.explanationContainer}
-        >
-          <Text style={styles.explanationTitle}>
-            {selectedAnswer === currentQuestion.correctAnswer ? 'Correct! 🎉' : 'Not quite right 💡'}
-          </Text>
-          <Text style={styles.explanationText}>{currentQuestion.explanation}</Text>
-        </Animated.View>
-      )}
-
-      {/* Bottom Button */}
-      {showResult && (
-        <Animated.View 
-          entering={FadeIn.duration(400)}
-          style={styles.bottomContainer}
-        >
-          {!showExplanation ? (
-            <TouchableOpacity 
-              style={styles.continueButton} 
-              onPress={() => setShowExplanation(true)}
-            >
-              <Text style={styles.continueButtonText}>
-                {selectedAnswer === currentQuestion.correctAnswer ? 'See Explanation' : 'Show Explanation'}
-              </Text>
-              <ArrowRight color={Colors.background.primary} size={20} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              style={styles.continueButton} 
-              onPress={handleContinue}
-            >
-              <Text style={styles.continueButtonText}>
-                {currentQuestionIndex < currentLesson.content.questions.length - 1 ? 'Continue' : 'Finish Lesson'}
-              </Text>
-              <ArrowRight color={Colors.background.primary} size={20} />
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-      )}
-
-      {/* Lesson Complete Modal */}
-      <LessonCompleteModal
-        visible={lessonComplete}
-        score={score}
-        totalQuestions={totalQuestions}
-        xpGained={xpGained}
-        streakGained={streakGained}
-        onNewLesson={startNewLesson}
-        onClose={() => {
-          setLessonComplete(false);
-          router.back();
-        }}
-      />
-    </View>
-  );
+    );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -900,37 +933,29 @@ const styles = StyleSheet.create({
     color: Colors.accent.orange,
     marginTop: SPACING.xs,
   },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: SPACING.md,
+  modalButtonsColumn: {
     width: '100%',
+    flexDirection: 'column',
+    gap: 16,
+    marginTop: 24,
   },
-  newLessonButton: {
-    backgroundColor: Colors.accent.magenta,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    flex: 1,
-    alignItems: 'center',
-    minHeight: 56,
-  },
-  newLessonButtonText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: FONT_SIZE.md,
-    color: Colors.background.primary,
-  },
-  doneButton: {
+  wideButton: {
+    width: '100%',
     backgroundColor: Colors.accent.teal,
     borderRadius: BORDER_RADIUS.lg,
     paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    flex: 1,
     alignItems: 'center',
-    minHeight: 56,
+    minHeight: 48,
   },
-  doneButtonText: {
-    fontFamily: 'Inter-Bold',
+  newLessonWideButton: {
+    backgroundColor: Colors.accent.magenta,
+    marginTop: 12,
+  },
+  wideButtonText: {
+    fontFamily: 'Inter-Medium',
     fontSize: FONT_SIZE.md,
     color: Colors.background.primary,
+    fontWeight: '400',
+    letterSpacing: 0.5,
   },
 });
