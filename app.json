@@ -16,7 +16,7 @@
       "package": "com.doughjo.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "transparent"
+        "backgroundColor": "#1A1A1A"
       }
     },
     "web": {
@@ -27,7 +27,8 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
@@ -36,15 +37,6 @@
       "router": {},
       "eas": {
         "projectId": "c409fb6f-e3e7-422f-9405-d2e99cbe4dfe"
-      }
-    }
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
       }
     }
   }
