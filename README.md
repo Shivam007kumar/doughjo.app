@@ -9,6 +9,7 @@
 ---
 
 🔗 [Download APK](https://github.com/Shivam007kumar/doughjo.app/releases/latest)
+**Note:** Version `v1` is currently more stable and has fewer bugs than `v1.0.1`. For the best experience, I recommend using version `v1` until further updates are released.
 
 ---
 ## 🚀 Features
